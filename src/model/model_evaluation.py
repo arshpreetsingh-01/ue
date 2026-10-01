@@ -248,7 +248,7 @@ def main():
             y_test = test_data.iloc[:, -1].values
 
             # Evaluate model (Set positive label explicitly)
-            metrics = evaluate_model(clf, X_test, y_test, pos_label="happiness")
+            metrics = evaluate_model(clf, X_test, y_test, pos_label="1")
 
             # Save metrics locally
             save_metrics(metrics, "reports/metrics.json")
