@@ -16,3 +16,11 @@ run   Pipeline
       cmd: python clean.py "${item}"
       outs:
       - ${item}.cln
+
+
+      cd ..
+      cd ..
+      cd myenv
+      source bin/activate
+      cd ..
+      cd 

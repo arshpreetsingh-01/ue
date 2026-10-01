@@ -118,20 +118,35 @@ def evaluate_model(
     clf,
     X_test: np.ndarray,
     y_test: np.ndarray,
-    pos_label: str = "happiness"  # Set to 'happiness' or 'sadness' depending on target positive class
+    pos_label=1
 ) -> dict:
     """Evaluate model and return metrics."""
     try:
         y_pred = clf.predict(X_test)
-
-        # Obtain prediction probabilities
         y_pred_proba = clf.predict_proba(X_test)
 
-        # Identify positive class index matching pos_label
+        # Identify positive class index dynamically to prevent index errors
         if hasattr(clf, "classes_"):
-            pos_idx = np.where(clf.classes_ == pos_label)[0][0]
+            classes = clf.classes_
+            
+            # Check for exact match (e.g. integer 1)
+            if pos_label in classes:
+                resolved_label = pos_label
+            # Check for string match (e.g. string '1')
+            elif str(pos_label) in classes:
+                resolved_label = str(pos_label)
+            # Fallback to the second class if the provided label isn't found
+            else:
+                resolved_label = classes[1] if len(classes) > 1 else classes[0]
+                logger.warning(
+                    "pos_label '%s' not found in %s. Automatically defaulting to '%s'.", 
+                    pos_label, classes, resolved_label
+                )
+            
+            pos_idx = np.where(classes == resolved_label)[0][0]
             pos_proba = y_pred_proba[:, pos_idx]
         else:
+            resolved_label = pos_label
             pos_proba = y_pred_proba[:, 1]
 
         accuracy = accuracy_score(y_test, y_pred)
@@ -139,19 +154,19 @@ def evaluate_model(
         precision = precision_score(
             y_test,
             y_pred,
-            pos_label=pos_label,
+            pos_label=resolved_label,
             zero_division=0
         )
 
         recall = recall_score(
             y_test,
             y_pred,
-            pos_label=pos_label,
+            pos_label=resolved_label,
             zero_division=0
         )
 
         auc = roc_auc_score(
-            y_test == pos_label,
+            y_test == resolved_label,
             pos_proba
         )
 
@@ -225,6 +240,7 @@ def save_model_info(
         "Model information saved to %s",
         file_path
     )
+
 # =========================================================
 # 9. Main
 # =========================================================
@@ -247,8 +263,8 @@ def main():
             X_test = test_data.iloc[:, :-1].values
             y_test = test_data.iloc[:, -1].values
 
-            # Evaluate model (Set positive label explicitly)
-            metrics = evaluate_model(clf, X_test, y_test, pos_label="1")
+            # Evaluate model
+            metrics = evaluate_model(clf, X_test, y_test, pos_label=1)
 
             # Save metrics locally
             save_metrics(metrics, "reports/metrics.json")
@@ -272,6 +288,7 @@ def main():
                 "Logged model ID: %s",
                 logged_model.model_id
             )
+            
             # Save experiment info
             save_model_info(
                 run_id=run.info.run_id,
