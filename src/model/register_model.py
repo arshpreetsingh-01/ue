@@ -1,89 +1,372 @@
-# register model
-
 import json
-import mlflow
 import logging
 import os
-import dagshub
 
-# Set up DagsHub credentials for MLflow tracking
-dagshub_token = os.getenv("DAGSHUB_PAT")
-if not dagshub_token:
-    raise EnvironmentError("DAGSHUB_PAT environment variable is not set")
-
-os.environ["MLFLOW_TRACKING_USERNAME"] = dagshub_token
-os.environ["MLFLOW_TRACKING_PASSWORD"] = dagshub_token
-
-dagshub_url = "https://dagshub.com"
-repo_owner = "campusx-official"
-repo_name = "mlops-mini-project"
-
-# Set up MLflow tracking URI
-mlflow.set_tracking_uri(f'{dagshub_url}/{repo_owner}/{repo_name}.mlflow')
+import mlflow
+from dotenv import load_dotenv
 
 
-# logging configuration
-logger = logging.getLogger('model_registration')
-logger.setLevel('DEBUG')
+# ============================================================
+# LOAD ENVIRONMENT VARIABLES
+# ============================================================
 
-console_handler = logging.StreamHandler()
-console_handler.setLevel('DEBUG')
+load_dotenv()
 
-file_handler = logging.FileHandler('model_registration_errors.log')
-file_handler.setLevel('ERROR')
 
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-console_handler.setFormatter(formatter)
-file_handler.setFormatter(formatter)
+# ============================================================
+# DAGSHUB CONFIGURATION
+# ============================================================
 
-logger.addHandler(console_handler)
-logger.addHandler(file_handler)
+DAGSHUB_USER = "arshpreetsingh-01"
+DAGSHUB_REPO = "ue"
+
+DAGSHUB_TOKEN = os.getenv("DAGSHUB_PAT")
+
+if not DAGSHUB_TOKEN:
+    raise EnvironmentError(
+        "DAGSHUB_PAT environment variable is not set."
+    )
+
+
+# ============================================================
+# MLFLOW CONFIGURATION
+# ============================================================
+
+TRACKING_URI = (
+    f"https://dagshub.com/"
+    f"{DAGSHUB_USER}/"
+    f"{DAGSHUB_REPO}.mlflow"
+)
+
+os.environ["MLFLOW_TRACKING_USERNAME"] = DAGSHUB_USER
+os.environ["MLFLOW_TRACKING_PASSWORD"] = DAGSHUB_TOKEN
+
+mlflow.set_tracking_uri(TRACKING_URI)
+
+
+# ============================================================
+# LOGGING
+# ============================================================
+
+logger = logging.getLogger("model_registration")
+logger.setLevel(logging.DEBUG)
+
+if not logger.handlers:
+
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.DEBUG)
+
+    file_handler = logging.FileHandler(
+        "model_registration_errors.log"
+    )
+    file_handler.setLevel(logging.ERROR)
+
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - "
+        "%(levelname)s - %(message)s"
+    )
+
+    console_handler.setFormatter(formatter)
+    file_handler.setFormatter(formatter)
+
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+
+
+# ============================================================
+# LOAD MODEL INFORMATION
+# ============================================================
 
 def load_model_info(file_path: str) -> dict:
-    """Load the model info from a JSON file."""
+
     try:
-        with open(file_path, 'r') as file:
+
+        with open(file_path, "r") as file:
             model_info = json.load(file)
-        logger.debug('Model info loaded from %s', file_path)
+
+        logger.info(
+            "Model information loaded from %s",
+            file_path
+        )
+
         return model_info
+
     except FileNotFoundError:
-        logger.error('File not found: %s', file_path)
-        raise
-    except Exception as e:
-        logger.error('Unexpected error occurred while loading the model info: %s', e)
+
+        logger.error(
+            "Model information file not found: %s",
+            file_path
+        )
+
         raise
 
-def register_model(model_name: str, model_info: dict):
-    """Register the model to the MLflow Model Registry."""
-    try:
-        model_uri = f"runs:/{model_info['run_id']}/{model_info['model_path']}"
-        
-        # Register the model
-        model_version = mlflow.register_model(model_uri, model_name)
-        
-        # Transition the model to "Staging" stage
-        client = mlflow.tracking.MlflowClient()
-        client.transition_model_version_stage(
-            name=model_name,
-            version=model_version.version,
-            stage="Staging"
+    except json.JSONDecodeError:
+
+        logger.error(
+            "Invalid JSON file: %s",
+            file_path
         )
-        
-        logger.debug(f'Model {model_name} version {model_version.version} registered and transitioned to Staging.')
-    except Exception as e:
-        logger.error('Error during model registration: %s', e)
+
         raise
+
+    except Exception as exc:
+
+        logger.error(
+            "Error loading model information: %s",
+            exc
+        )
+
+        raise
+
+
+# ============================================================
+# GET LOGGED MODEL
+# ============================================================
+
+def get_logged_model(model_id: str):
+
+    try:
+
+        logger.info(
+            "Retrieving LoggedModel from MLflow..."
+        )
+
+        logger.info(
+            "Model ID: %s",
+            model_id
+        )
+
+        logged_model = mlflow.get_logged_model(
+            model_id
+        )
+
+        logger.info(
+            "LoggedModel successfully retrieved."
+        )
+
+        logger.info(
+            "Logged model ID: %s",
+            logged_model.model_id
+        )
+
+        logger.info(
+            "Logged model name: %s",
+            logged_model.name
+        )
+
+        logger.info(
+            "Logged model artifact URI: %s",
+            logged_model.artifact_location
+        )
+
+        logger.info(
+            "Source run ID: %s",
+            logged_model.source_run_id
+        )
+
+        return logged_model
+
+    except Exception as exc:
+
+        logger.error(
+            "Unable to retrieve LoggedModel: %s",
+            exc
+        )
+
+        raise
+
+
+# ============================================================
+# REGISTER LOGGED MODEL
+# ============================================================
+
+def register_model(
+    model_name: str,
+    model_info: dict
+):
+
+    # --------------------------------------------------------
+    # Get model_id from experiment_info.json
+    # --------------------------------------------------------
+
+    model_id = model_info.get("model_id")
+
+    if not model_id:
+
+        raise ValueError(
+            "model_id is missing from "
+            "reports/experiment_info.json"
+        )
+
+    logger.info(
+        "=========================================="
+    )
+
+    logger.info(
+        "MLflow version: %s",
+        mlflow.__version__
+    )
+
+    logger.info(
+        "MLflow tracking URI: %s",
+        mlflow.get_tracking_uri()
+    )
+
+    logger.info(
+        "DagsHub repository: %s",
+        DAGSHUB_REPO
+    )
+
+    logger.info(
+        "Model ID: %s",
+        model_id
+    )
+
+    logger.info(
+        "=========================================="
+    )
+
+    # --------------------------------------------------------
+    # Retrieve the actual MLflow 3.x LoggedModel
+    # --------------------------------------------------------
+
+    logged_model = get_logged_model(
+        model_id
+    )
+
+    # --------------------------------------------------------
+    # Verify that the model belongs to the expected run
+    # --------------------------------------------------------
+
+    logger.info(
+        "Verifying source run..."
+    )
+
+    logger.info(
+        "Source run ID: %s",
+        logged_model.source_run_id
+    )
+
+    # --------------------------------------------------------
+    # Get the actual artifact URI from LoggedModel
+    # --------------------------------------------------------
+
+    model_uri = logged_model.artifact_location
+
+    if not model_uri:
+
+        raise ValueError(
+            "LoggedModel does not contain an "
+            "artifact location."
+        )
+
+    logger.info(
+        "Using LoggedModel artifact URI: %s",
+        model_uri
+    )
+
+    # --------------------------------------------------------
+    # Register model
+    # --------------------------------------------------------
+
+    logger.info(
+        "Registering model as '%s'...",
+        model_name
+    )
+
+    model_version = mlflow.register_model(
+        model_uri=model_uri,
+        name=model_name
+    )
+
+    logger.info(
+        "=========================================="
+    )
+
+    logger.info(
+        "MODEL REGISTERED SUCCESSFULLY"
+    )
+
+    logger.info(
+        "Model name: %s",
+        model_version.name
+    )
+
+    logger.info(
+        "Model version: %s",
+        model_version.version
+    )
+
+    logger.info(
+        "Source: %s",
+        model_version.source
+    )
+
+    logger.info(
+        "=========================================="
+    )
+
+    return model_version
+
+
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
-    try:
-        model_info_path = 'reports/experiment_info.json'
-        model_info = load_model_info(model_info_path)
-        
-        model_name = "my_model"
-        register_model(model_name, model_info)
-    except Exception as e:
-        logger.error('Failed to complete the model registration process: %s', e)
-        print(f"Error: {e}")
 
-if __name__ == '__main__':
+    try:
+
+        # ----------------------------------------------------
+        # experiment_info.json created by model_evaluation.py
+        # ----------------------------------------------------
+
+        model_info_path = (
+            "reports/experiment_info.json"
+        )
+
+        model_info = load_model_info(
+            model_info_path
+        )
+
+        # ----------------------------------------------------
+        # Model Registry name
+        # ----------------------------------------------------
+
+        model_name = "my_model"
+
+        # ----------------------------------------------------
+        # Register
+        # ----------------------------------------------------
+
+        model_version = register_model(
+            model_name=model_name,
+            model_info=model_info
+        )
+
+        print(
+            f"Model '{model_version.name}' "
+            f"version '{model_version.version}' "
+            f"registered successfully."
+        )
+
+    except Exception as exc:
+
+        logger.error(
+            "Failed to complete model registration: %s",
+            exc
+        )
+
+        print(
+            f"Model registration failed: {exc}"
+        )
+
+        raise
+
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
+
+if __name__ == "__main__":
     main()
