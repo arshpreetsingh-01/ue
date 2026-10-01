@@ -1,1 +1,18 @@
-export DAGSHUB_PAT=20ea61abaccb881f414ac6ff00e8bbed6ce838c9
+export DAGSHUB_PAT=
+
+pip freeze > requirements.txt
+
+
+Instead of using equal to equal two, we can use near S equal to
+
+steps: 
+code checkout 
+setup python 
+install dependencies
+run   Pipeline
+     - raw1
+      - raw2
+    do:
+      cmd: python clean.py "${item}"
+      outs:
+      - ${item}.cln
