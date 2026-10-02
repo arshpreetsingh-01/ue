@@ -1,3 +1,4 @@
+```python
 import os
 import pickle
 import unittest
@@ -12,7 +13,7 @@ class TestModelLoading(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # ---------------------------------------------------------
-        # 1. DagsHub / MLflow authentication
+        # 1. Read DagsHub credentials from GitHub Actions secrets
         # ---------------------------------------------------------
         repo_owner = os.getenv("DAGSHUB_USER")
         repo_name = "ue"
@@ -24,51 +25,75 @@ class TestModelLoading(unittest.TestCase):
         if not dagshub_token:
             raise RuntimeError("DAGSHUB_PAT is not set")
 
-        # Explicit MLflow credentials for CI/CD environments
+        # ---------------------------------------------------------
+        # 2. Configure MLflow authentication explicitly
+        # ---------------------------------------------------------
         os.environ["MLFLOW_TRACKING_USERNAME"] = repo_owner
         os.environ["MLFLOW_TRACKING_PASSWORD"] = dagshub_token
 
-        # Authenticate DagsHub
+        tracking_uri = (
+            f"https://dagshub.com/{repo_owner}/{repo_name}.mlflow"
+        )
+
+        os.environ["MLFLOW_TRACKING_URI"] = tracking_uri
+
+        # ---------------------------------------------------------
+        # 3. Authenticate with DagsHub
+        # ---------------------------------------------------------
         dagshub.auth.add_app_token(dagshub_token)
 
-        # Initialize DagsHub MLflow
         dagshub.init(
             repo_owner=repo_owner,
             repo_name=repo_name,
             mlflow=True,
         )
 
-        # Make tracking URI explicit
-        tracking_uri = (
-            f"https://dagshub.com/{repo_owner}/{repo_name}.mlflow"
-        )
+        # Make tracking / registry URI explicit
         mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_registry_uri(tracking_uri)
+
+        print(f"MLflow tracking URI: {tracking_uri}")
 
         # ---------------------------------------------------------
-        # 2. Find the model version
+        # 4. Create MLflow client
         # ---------------------------------------------------------
+        client = mlflow.MlflowClient(
+            tracking_uri=tracking_uri,
+            registry_uri=tracking_uri,
+        )
+
         cls.new_model_name = "my_model"
 
-        client = mlflow.MlflowClient()
+        # ---------------------------------------------------------
+        # 5. Find model version
+        #
+        # First try the "champion" alias.
+        # If DagsHub does not support / expose that alias,
+        # fall back to the latest READY version.
+        # ---------------------------------------------------------
+        mv = None
 
         try:
-            # Preferred: MLflow alias
             mv = client.get_model_version_by_alias(
                 cls.new_model_name,
                 "champion",
             )
 
             print(
-                f"Using champion model: "
-                f"{cls.new_model_name} v{mv.version}"
+                f"Using champion model version: {mv.version}"
             )
 
         except Exception as alias_error:
             print(
-                f"Champion alias was not available: {alias_error}"
+                "Champion alias could not be used. "
+                f"Falling back to latest READY version. "
+                f"Reason: {alias_error}"
             )
-            print("Searching for the latest model version...")
 
+        # ---------------------------------------------------------
+        # 6. Fallback: find latest READY model version
+        # ---------------------------------------------------------
+        if mv is None:
             versions = list(
                 client.search_model_versions(
                     filter_string=f"name = '{cls.new_model_name}'"
@@ -77,20 +102,19 @@ class TestModelLoading(unittest.TestCase):
 
             if not versions:
                 raise RuntimeError(
-                    f"No versions found for registered model "
+                    f"No model versions found for "
                     f"'{cls.new_model_name}'."
                 )
 
-            # Only consider READY versions
             ready_versions = [
                 version
                 for version in versions
-                if version.status == "READY"
+                if str(version.status).upper() == "READY"
             ]
 
             if not ready_versions:
                 raise RuntimeError(
-                    f"No READY versions found for "
+                    f"No READY model versions found for "
                     f"'{cls.new_model_name}'."
                 )
 
@@ -100,12 +124,11 @@ class TestModelLoading(unittest.TestCase):
             )
 
             print(
-                f"Using latest READY model: "
-                f"{cls.new_model_name} v{mv.version}"
+                f"Using latest READY model version: {mv.version}"
             )
 
         # ---------------------------------------------------------
-        # 3. Validate model version metadata
+        # 7. Store model metadata
         # ---------------------------------------------------------
         cls.new_model_version = str(mv.version)
 
@@ -116,104 +139,88 @@ class TestModelLoading(unittest.TestCase):
         print(f"Model run_id: {mv.run_id}")
         print(f"Model model_id: {mv.model_id}")
 
-        if mv.status != "READY":
+        if str(mv.status).upper() != "READY":
             raise RuntimeError(
-                f"Model {cls.new_model_name} version "
+                f"Model '{cls.new_model_name}' version "
                 f"{cls.new_model_version} is not READY. "
                 f"Current status: {mv.status}"
             )
 
+        if not mv.source:
+            raise RuntimeError(
+                f"Model '{cls.new_model_name}' version "
+                f"{cls.new_model_version} has no source URI."
+            )
+
         # ---------------------------------------------------------
-        # 4. Load model WITHOUT models:/name/version
+        # 8. Download using the MODEL SOURCE URI
         #
         # IMPORTANT:
-        # DagsHub is currently returning HTTP 500 for:
         #
-        #   /api/2.0/mlflow/model-versions/get-download-uri
+        # Do NOT use:
         #
-        # Therefore we use the registered model's SOURCE URI.
-        # For normally registered models this is typically:
+        # models:/my_model/14
         #
-        #   runs:/<run_id>/<artifact_path>
+        # because MLflow then calls:
         #
-        # This bypasses the failing registry download-uri request.
+        # get-model-version-download-uri
+        #
+        # which was returning HTTP 500 from DagsHub.
+        #
+        # Your MLflow 3.x model has this source instead:
+        #
+        # mlflow-artifacts:/...
+        #
+        # That is a valid MLflow artifact URI.
         # ---------------------------------------------------------
         model_source_uri = mv.source
 
-        if not model_source_uri:
+        print(
+            f"Downloading model from source URI: "
+            f"{model_source_uri}"
+        )
+
+        try:
+            local_model_dir = mlflow.artifacts.download_artifacts(
+                artifact_uri=model_source_uri,
+                tracking_uri=tracking_uri,
+                registry_uri=tracking_uri,
+            )
+
+        except Exception as download_error:
             raise RuntimeError(
-                f"Model {cls.new_model_name} version "
-                f"{cls.new_model_version} does not have a source URI."
-            )
+                "Failed to download the registered model "
+                "using its source URI.\n"
+                f"Source URI: {model_source_uri}\n"
+                f"Tracking URI: {tracking_uri}\n"
+                f"Original error: {download_error}"
+            ) from download_error
 
-        print(f"Loading model from source URI: {model_source_uri}")
-
-        # Standard MLflow registration from a run normally produces
-        # a runs:/ URI. This is the path we intentionally want here.
-        if model_source_uri.startswith("runs:/"):
-            cls.new_model = mlflow.pyfunc.load_model(
-                model_source_uri
-            )
-
-        else:
-            # MLflow 3.x can have model versions linked to a
-            # LoggedModel using model_id.
-            #
-            # Try to resolve the LoggedModel artifact URI first.
-            if mv.model_id:
-                print(
-                    "Model source is not a runs:/ URI. "
-                    "Trying MLflow LoggedModel metadata..."
-                )
-
-                try:
-                    logged_model = mlflow.get_logged_model(
-                        mv.model_id
-                    )
-
-                    logged_model_uri = logged_model.artifact_uri
-
-                    if not logged_model_uri:
-                        raise RuntimeError(
-                            "LoggedModel has no artifact_uri."
-                        )
-
-                    print(
-                        f"LoggedModel artifact URI: "
-                        f"{logged_model_uri}"
-                    )
-
-                    if logged_model_uri.startswith("runs:/"):
-                        cls.new_model = mlflow.pyfunc.load_model(
-                            logged_model_uri
-                        )
-                    else:
-                        raise RuntimeError(
-                            "The LoggedModel artifact URI is not a "
-                            f"runs:/ URI: {logged_model_uri}"
-                        )
-
-                except Exception as logged_model_error:
-                    raise RuntimeError(
-                        "Unable to load the registered model without "
-                        "using DagsHub's failing "
-                        "get-download-uri endpoint.\n"
-                        f"Model source: {model_source_uri}\n"
-                        f"Model run_id: {mv.run_id}\n"
-                        f"Model model_id: {mv.model_id}\n"
-                        f"LoggedModel error: {logged_model_error}"
-                    ) from logged_model_error
-
-            else:
-                raise RuntimeError(
-                    "The registered model does not expose a usable "
-                    "runs:/ source URI or model_id.\n"
-                    f"Model source: {model_source_uri}\n"
-                    f"Model run_id: {mv.run_id}"
-                )
+        print(
+            f"Model downloaded successfully to: "
+            f"{local_model_dir}"
+        )
 
         # ---------------------------------------------------------
-        # 5. Load vectorizer
+        # 9. Load the downloaded model locally
+        # ---------------------------------------------------------
+        try:
+            cls.new_model = mlflow.pyfunc.load_model(
+                local_model_dir
+            )
+
+        except Exception as load_error:
+            raise RuntimeError(
+                "Model artifacts were downloaded, but MLflow "
+                "could not load the model.\n"
+                f"Local model directory: {local_model_dir}\n"
+                f"Original error: {load_error}"
+            ) from load_error
+
+        print("MLflow model loaded successfully.")
+
+        # ---------------------------------------------------------
+        # 10. Load vectorizer
         # ---------------------------------------------------------
         vectorizer_path = "models/vectorizer.pkl"
 
@@ -222,11 +229,13 @@ class TestModelLoading(unittest.TestCase):
                 f"Vectorizer not found: {vectorizer_path}"
             )
 
-        with open(vectorizer_path, "rb") as f:
-            cls.vectorizer = pickle.load(f)
+        with open(vectorizer_path, "rb") as file:
+            cls.vectorizer = pickle.load(file)
+
+        print("Vectorizer loaded successfully.")
 
         # ---------------------------------------------------------
-        # 6. Load holdout test data
+        # 11. Load processed test data
         # ---------------------------------------------------------
         test_data_path = "data/processed/test_bow.csv"
 
@@ -237,20 +246,21 @@ class TestModelLoading(unittest.TestCase):
 
         cls.holdout_data = pd.read_csv(test_data_path)
 
-        print("Model, vectorizer, and holdout data loaded successfully.")
+        print("Holdout test data loaded successfully.")
 
     # -------------------------------------------------------------
-    # Test 1: Model loaded
+    # Test 1: Check model object
     # -------------------------------------------------------------
     def test_model_loaded_properly(self):
         self.assertIsNotNone(self.new_model)
 
     # -------------------------------------------------------------
-    # Test 2: Model input/output signature
+    # Test 2: Check model input/output signature
     # -------------------------------------------------------------
     def test_model_signature(self):
         input_text = "hi how are you"
 
+        # Transform text using the same vectorizer
         input_data = self.vectorizer.transform([input_text])
 
         input_df = pd.DataFrame(
@@ -261,15 +271,16 @@ class TestModelLoading(unittest.TestCase):
             ],
         )
 
+        # Predict
         prediction = self.new_model.predict(input_df)
 
-        # Number of features must match vectorizer
+        # Number of features must match the vectorizer
         self.assertEqual(
             input_df.shape[1],
             len(self.vectorizer.get_feature_names_out()),
         )
 
-        # One input row -> one prediction
+        # One input row must produce one prediction
         self.assertEqual(
             len(prediction),
             input_df.shape[0],
@@ -284,3 +295,4 @@ class TestModelLoading(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+```
