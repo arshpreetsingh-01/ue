@@ -23,4 +23,3 @@ run   Pipeline
       cd myenv
       source bin/activate
       cd ..
-      cd 
