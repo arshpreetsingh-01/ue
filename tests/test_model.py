@@ -9,19 +9,23 @@ class TestModelLoading(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # 1. Set up DagsHub environment
-        dagshub_token = os.getenv("DAGSHUB_PAT")
-        if not dagshub_token:
-            raise EnvironmentError("DAGSHUB_PAT environment variable is not set")
-
-        os.environ["MLFLOW_TRACKING_USERNAME"] = dagshub_token
-        os.environ["MLFLOW_TRACKING_PASSWORD"] = dagshub_token
-
-        repo_owner = "arshpreetsingh-01"
+        repo_owner = os.getenv("DAGSHUB_USER")
         repo_name = "ue"
+        dagshub_token = os.getenv("DAGSHUB_PAT")
 
-        # Initialize DagsHub hooks for MLflow 3.x compatibility
-        dagshub.init(repo_owner=repo_owner, repo_name=repo_name, mlflow=True)
+        if not repo_owner:
+            raise RuntimeError("DAGSHUB_USER is not set")
+
+        if not dagshub_token:
+            raise RuntimeError("DAGSHUB_PAT is not set")
+
+        dagshub.auth.add_app_token(dagshub_token)
+
+        dagshub.init(
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            mlflow=True
+        )
 
         cls.new_model_name = "my_model"
         
