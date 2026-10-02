@@ -6,7 +6,14 @@ import unittest
 import mlflow
 import pandas as pd
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+import warnings
 
+# Suppress Pydantic protected namespace warnings during test runs
+warnings.filterwarnings(
+    "ignore", 
+    category=UserWarning, 
+    module="pydantic.*"
+)
 
 class TestModelLoading(unittest.TestCase):
 

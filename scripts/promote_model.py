@@ -2,6 +2,7 @@
 
 import os
 import mlflow
+from mlflow import MlflowClient
 
 def promote_model():
     # Set up DagsHub credentials for MLflow tracking
@@ -13,34 +14,46 @@ def promote_model():
     os.environ["MLFLOW_TRACKING_PASSWORD"] = dagshub_token
 
     dagshub_url = "https://dagshub.com"
-    repo_owner = "campusx-official"
-    repo_name = "mlops-mini-project"
+    repo_owner = "arshpreetsingh-01"
+    repo_name = "ue"
 
     # Set up MLflow tracking URI
     mlflow.set_tracking_uri(f'{dagshub_url}/{repo_owner}/{repo_name}.mlflow')
 
-    client = mlflow.MlflowClient()
-
+    client = MlflowClient()
     model_name = "my_model"
-    # Get the latest version in staging
-    latest_version_staging = client.get_latest_versions(model_name, stages=["Staging"])[0].version
 
-    # Archive the current production model
-    prod_versions = client.get_latest_versions(model_name, stages=["Production"])
-    for version in prod_versions:
-        client.transition_model_version_stage(
-            name=model_name,
-            version=version.version,
-            stage="Archived"
-        )
+    # --------------------------------------------------------------------------
+    # 1. Fetch the target model version to promote
+    # --------------------------------------------------------------------------
+    # Modern approach: Retrieve model version by 'candidate' / 'staging' alias,
+    # or fall back to getting the latest created version number.
+    try:
+        staging_version_obj = client.get_model_version_by_alias(model_name, "staging")
+        target_version = staging_version_obj.version
+    except Exception:
+        # Fallback: Find the latest created model version if no alias is set
+        all_versions = client.search_model_versions(f"name='{model_name}'")
+        if not all_versions:
+            raise RuntimeError(f"No registered model versions found for model '{model_name}'")
+        
+        latest_version = max(all_versions, key=lambda v: int(v.version))
+        target_version = latest_version.version
 
-    # Promote the new model to production
-    client.transition_model_version_stage(
+    # --------------------------------------------------------------------------
+    # 2. Promote model version to Production using Model Aliases
+    # --------------------------------------------------------------------------
+    # Assigning the 'champion' (or 'production') alias automatically transfers 
+    # it from any previous version to the target_version.
+    target_alias = "champion"  # or "production"
+    
+    client.set_registered_model_alias(
         name=model_name,
-        version=latest_version_staging,
-        stage="Production"
+        alias=target_alias,
+        version=str(target_version)
     )
-    print(f"Model version {latest_version_staging} promoted to Production")
+
+    print(f"Model version {target_version} successfully promoted with alias '{target_alias}'.")
 
 if __name__ == "__main__":
     promote_model()
