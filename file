@@ -23,3 +23,18 @@ run   Pipeline
       cd myenv
       source bin/activate
       cd ..
+
+
+      docker build -t arshpreetsingh01/emotion_detection
+
+
+      pipreqs . --force
+
+
+      docker run -p 8888:5000 \
+  -e DAGSHUB_PAT="20ea61abaccb881f414ac6ff00e8bbed6ce838c9" \
+  arshpreetsingh01/emotion1
+
+  docker pull arshpreetsingh01/emotion1
+  docker run -p 8888:5000 arshpreetsingh01/emotion1
+  

@@ -8,12 +8,18 @@ import pandas as pd
 
 import numpy as np
 import pandas as pd
-import os
 import re
 import nltk
 import string
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
+import os
+
+# Instead of raising an error immediately, retrieve with a fallback/check
+dagshub_pat = os.getenv("DAGSHUB_PAT")
+if not dagshub_pat:
+    # Handle gracefully or log a warning if it's optional for inference
+    print("Warning: DAGSHUB_PAT not set.")
 
 def lemmatization(text):
     """Lemmatize the text."""
