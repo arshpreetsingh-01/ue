@@ -245,6 +245,10 @@ def save_model_info(
 # 9. Main
 # =========================================================
 
+# =========================================================
+# 9. Main
+# =========================================================
+
 def main():
     try:
         # Set experiment name
@@ -278,21 +282,24 @@ def main():
                 clean_params = {key: str(value) for key, value in params.items()}
                 mlflow.log_params(clean_params)
 
-            # Log model artifact
+            # ✅ FIXED: Changed 'name' to 'artifact_path'
             logged_model = mlflow.sklearn.log_model(
                 sk_model=clf,
-                name="model"
+                artifact_path="model"
             )
+
+            # Get model_id safely from ModelInfo or construct fallback
+            model_id = getattr(logged_model, "model_id", f"runs:/{run.info.run_id}/model")
 
             logger.info(
                 "Logged model ID: %s",
-                logged_model.model_id
+                model_id
             )
             
             # Save experiment info
             save_model_info(
                 run_id=run.info.run_id,
-                model_id=logged_model.model_id,
+                model_id=model_id,
                 file_path="reports/experiment_info.json"
             )
 
@@ -315,4 +322,3 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
