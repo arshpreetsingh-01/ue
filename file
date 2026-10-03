@@ -38,3 +38,5 @@ run   Pipeline
   docker pull arshpreetsingh01/emotion1
   docker run -p 8888:5000 arshpreetsingh01/emotion1
   
+
+  dckr_pat_ouDp1u2eXHP2UvliEtQ3TGgCgyo
